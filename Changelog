@@ -1,0 +1,6 @@
+Version 0.1.1
+ - add each application only once into the daemon's application-list
+ - do not try to create the dbus-interface, if it already exists
+
+Version 0.1
+ - initial
