@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 '''
 Created on 11.03.2010
@@ -12,14 +12,25 @@ import dbus.service
 import gobject
 
 from optparse import OptionParser
+import time
 
 
 AppName = 'mediakeys-daemon'
-Version='0.1.1'
+Version='0.2'
 
 DbusBusName = 'org.gnome.SettingsDaemon'
 DbusObjectPath = '/org/gnome/SettingsDaemon/MediaKeys'
 DbusInterface = 'org.gnome.SettingsDaemon.MediaKeys'
+
+
+
+class App(object):
+    def __init__(self, app_name, app_time):
+        self.name = app_name
+        self.time = app_time
+
+    def __cmp__(self, other):
+        return self.time.__cmp__(other.time)
 
 
 
@@ -30,44 +41,68 @@ class SettingsDaemonObject(dbus.service.Object):
         self.__playing = False
         self.__apps = []
 
+    def __find_app(self, app_name):
+        for app in self.__apps:
+            if app.name == app_name:
+                return app
+        return None
+
     @dbus.service.method(dbus_interface=DbusInterface, in_signature='sd', out_signature='')
-    def GrabMediaPlayerKeys(self, AppName, time):
-        if not AppName in self.__apps:
-            self.__apps.append(AppName)
+    def GrabMediaPlayerKeys(self, app_name, app_time):
+        # Each app registers with a timestamp (priority). The app with the
+        # most recent timestamp (highest priority) gets the notification.
+        # Timestamp may be 0 for the current time. 1 is commonly used for
+        # "least priority" (e.g. by Evince). Timestamps are in milliseconds.
+        if app_time == 0:
+            app_time = int(time.time()*1000)
+        # Check if app is already registered; update timestamp if so.
+        app = self.__find_app(app_name)
+        if app:
+            if app.time < app_time:
+                self.__apps.remove(app)
+            else:
+                return
+        # Install new app into the list
+        self.__apps.append(App(app_name, app_time))
+        self.__apps.sort(reverse=True)
     
     @dbus.service.method(dbus_interface=DbusInterface, in_signature='s', out_signature='')
-    def ReleaseMediaPlayerKeys(self, AppName):
-        self.__apps.remove(AppName)
+    def ReleaseMediaPlayerKeys(self, app_name):
+        app = self.__find_app(app_name)
+        if app:
+            self.__apps.remove(app)
 
     @dbus.service.signal(dbus_interface=DbusInterface)
-    def MediaPlayerKeyPressed(self, AppName, action):
+    def MediaPlayerKeyPressed(self, app_name, action):
         pass
     
-    def __send_action_to_all_apps(self, action):
-        for app in self.__apps:
-            self.MediaPlayerKeyPressed(app, action)
+    def __send_action_to_app(self, action):
+        # Send media key notification to highest-priority application.
+        if len(self.__apps):
+            app = self.__apps[0]
+            self.MediaPlayerKeyPressed(app.name, action)
     
     @dbus.service.method(dbus_interface=DbusInterface)
     def PressedPlay(self):
-        self.__send_action_to_all_apps('Play')
+        self.__send_action_to_app('Play')
         self.__playing = True
     
     @dbus.service.method(dbus_interface=DbusInterface)
     def PressedPause(self):
-        self.__send_action_to_all_apps('Pause')
+        self.__send_action_to_app('Pause')
     
     @dbus.service.method(dbus_interface=DbusInterface)
     def PressedStop(self):
-        self.__send_action_to_all_apps('Stop')
+        self.__send_action_to_app('Stop')
     
     @dbus.service.method(dbus_interface=DbusInterface)
     def PressedNext(self):
-        self.__send_action_to_all_apps('Next')
+        self.__send_action_to_app('Next')
     
     @dbus.service.method(dbus_interface=DbusInterface)
     def PressedPrevious(self):
-        self.__send_action_to_all_apps('Previous')
-
+        self.__send_action_to_app('Previous')
+    
 
 
 class Server(object):
@@ -80,7 +115,7 @@ class Server(object):
         if not DbusBusName in activeServices:
             name = dbus.service.BusName(DbusBusName, session_bus)
             object = SettingsDaemonObject(session_bus)
-    
+
             mainloop = gobject.MainLoop()
             mainloop.run()
         else:
@@ -111,13 +146,26 @@ class Client(object):
 
 
 if __name__ == '__main__':
-    parser = OptionParser(usage='usage: %prog [options] ', version=Version, description="Multimedia Key Daemon")  
-    parser.add_option('-p', '--play', action='store_true', help='send play event to all listeners', dest='play', default=False)
-    parser.add_option('-a', '--pause', action='store_true', help='send pause event to all listeners', dest='pause', default=False)
-    parser.add_option('-s', '--stop', action='store_true', help='send stop event to all listeners', dest='stop', default=False)
-    parser.add_option('-n', '--next', action='store_true', help='send next-track event to all listeners', dest='next', default=False)
-    parser.add_option('-b', '--previous', action='store_true', help='send previous-track event to all listeners', dest='previous', default=False)
-    parser.add_option('-d', '--daemon', action='store_true', help='start the daemon, if not already running', dest='daemon', default=False)
+    parser = OptionParser(usage='usage: %prog [options] ', version=Version,
+                          description="Multimedia Key Daemon")  
+    parser.add_option('-p', '--play', action='store_true',
+                      help='send play event to all listeners',
+                      dest='play', default=False)
+    parser.add_option('-a', '--pause', action='store_true',
+                      help='send pause event to all listeners',
+                      dest='pause', default=False)
+    parser.add_option('-s', '--stop', action='store_true',
+                      help='send stop event to all listeners',
+                      dest='stop', default=False)
+    parser.add_option('-n', '--next', action='store_true',
+                      help='send next-track event to all listeners',
+                      dest='next', default=False)
+    parser.add_option('-b', '--previous', action='store_true',
+                      help='send previous-track event to all listeners',
+                      dest='previous', default=False)
+    parser.add_option('-d', '--daemon', action='store_true',
+                      help='start the daemon, if not already running',
+                      dest='daemon', default=False)
     (options, args) = parser.parse_args()
    
     if args=="none":
