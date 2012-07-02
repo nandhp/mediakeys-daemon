@@ -27,7 +27,7 @@ DbusInterface = 'org.gnome.SettingsDaemon.MediaKeys'
 class App(object):
     def __init__(self, app_name, app_time):
         self.name = app_name
-        self.time = app_time
+        self.time = int(app_time)
 
     def __cmp__(self, other):
         return self.time.__cmp__(other.time)
